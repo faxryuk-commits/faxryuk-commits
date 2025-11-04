@@ -153,8 +153,39 @@ class YandexMapsParser(BaseMapsParser):
             'description': '',
             'working_hours': {},
             'photos': [],
+            'email': None,
+            'emails': [],
+            'website': None,
+            'websites': [],
             'source': 'yandex_maps'
         }
+        
+        # Извлекаем весь текст страницы для поиска email
+        page_text = soup.get_text()
+        
+        # Email (из специальных полей или из текста)
+        email_elem = soup.find('a', href=re.compile(r'mailto:'))
+        if email_elem:
+            email = email_elem.get('href', '').replace('mailto:', '')
+            if email:
+                details['email'] = email
+                details['emails'] = [email]
+        
+        # Если не нашли в mailto, ищем в тексте
+        if not details.get('email'):
+            emails = self._extract_emails(page_text)
+            if emails:
+                details['emails'] = emails
+                details['email'] = emails[0]
+        
+        # Сайт
+        website_elem = soup.find('a', class_='business-urls-view__text') or \
+                      soup.find('a', href=re.compile(r'^https?://'))
+        if website_elem:
+            href = website_elem.get('href', '')
+            if href.startswith('http'):
+                details['website'] = href
+                details['websites'] = [href]
         
         # Часы работы
         hours_section = soup.find('div', class_='business-contacts-view__schedule')

@@ -25,7 +25,11 @@ class Organization(BaseModel):
     name: str
     address: Optional[str] = None
     phone: Optional[str] = None
+    phones: List[str] = Field(default_factory=list)
+    email: Optional[str] = None
+    emails: List[str] = Field(default_factory=list)
     website: Optional[str] = None
+    websites: List[str] = Field(default_factory=list)
     category: Optional[str] = None
     rating: float = 0.0
     reviews_count: int = 0
