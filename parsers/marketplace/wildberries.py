@@ -219,31 +219,31 @@ class WildberriesParser(BaseMarketplaceParser):
                         products = products[:limit]
                     logger.info(f"Веб-версия вернула {len(products)} товаров")
                     return products
-                                 elif response and response.status_code == 498:
-                     # Статус 498 - возможная блокировка, ждем и пробуем еще раз
-                     if web_attempt < web_max_retries - 1:
-                         wait_time = base_delay * (web_attempt + 1) * 2
-                         logger.warning(f"Веб-версия вернула 498, жду {wait_time:.1f} секунд перед повтором")
-                         time.sleep(wait_time)
-                         # Переинициализируем сессию
-                         self._init_session()
-                         continue
-                     else:
-                         logger.error(f"Веб-версия вернула 498 после {web_max_retries} попыток - возможная блокировка")
-                         return []
-                 elif not response:
-                     # Response = None означает, что произошла ошибка
-                     if web_attempt < web_max_retries - 1:
-                         wait_time = base_delay * (web_attempt + 1)
-                         logger.warning(f"Веб-версия вернула None (ошибка), жду {wait_time:.1f} секунд перед повтором")
-                         time.sleep(wait_time)
-                         continue
-                     else:
-                         logger.error("Не удалось получить ответ от веб-версии после всех попыток")
-                         return []
-                 else:
-                     logger.error(f"Не удалось получить ответ от веб-версии, статус: {response.status_code}")
-                     return []
+                elif response and response.status_code == 498:
+                    # Статус 498 - возможная блокировка, ждем и пробуем еще раз
+                    if web_attempt < web_max_retries - 1:
+                        wait_time = base_delay * (web_attempt + 1) * 2
+                        logger.warning(f"Веб-версия вернула 498, жду {wait_time:.1f} секунд перед повтором")
+                        time.sleep(wait_time)
+                        # Переинициализируем сессию
+                        self._init_session()
+                        continue
+                    else:
+                        logger.error(f"Веб-версия вернула 498 после {web_max_retries} попыток - возможная блокировка")
+                        return []
+                elif not response:
+                    # Response = None означает, что произошла ошибка
+                    if web_attempt < web_max_retries - 1:
+                        wait_time = base_delay * (web_attempt + 1)
+                        logger.warning(f"Веб-версия вернула None (ошибка), жду {wait_time:.1f} секунд перед повтором")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error("Не удалось получить ответ от веб-версии после всех попыток")
+                        return []
+                else:
+                    logger.error(f"Не удалось получить ответ от веб-версии, статус: {response.status_code}")
+                    return []
             
             return []
         except Exception as e:
