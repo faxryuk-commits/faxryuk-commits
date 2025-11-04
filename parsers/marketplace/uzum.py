@@ -45,46 +45,122 @@ class UzumParser(BaseMarketplaceParser):
         soup = self._parse_html(html)
         products = []
         
-        # Ищем карточки товаров - селекторы могут варьироваться
-        product_cards = (
-            soup.find_all('div', class_='product-card') or
-            soup.find_all('div', {'data-product-id': True}) or
-            soup.find_all('article', class_='product') or
-            soup.find_all('div', class_='item')
-        )
+        # Ищем карточки товаров - пробуем разные селекторы
+        product_cards = []
         
-        logger.info(f"Найдено {len(product_cards)} карточек товаров")
+        # Пробуем разные варианты селекторов
+        selectors = [
+            soup.find_all('div', class_='product-card'),
+            soup.find_all('div', {'data-product-id': True}),
+            soup.find_all('article', class_='product'),
+            soup.find_all('div', class_='item'),
+            soup.find_all('a', href=True, class_=lambda x: x and 'product' in x.lower()),
+            soup.find_all('div', class_=lambda x: x and ('product' in x.lower() or 'item' in x.lower())),
+            # Универсальные селекторы
+            soup.find_all('div', {'data-id': True}),
+            soup.find_all('article'),
+            # По структуре - если есть ссылка и изображение, возможно это товар
+            [elem for elem in soup.find_all('div') if elem.find('a') and elem.find('img')],
+        ]
         
-        for card in product_cards:
+        for selector_result in selectors:
+            if selector_result:
+                product_cards = selector_result
+                logger.info(f"Найдено {len(product_cards)} карточек товаров используя селектор")
+                break
+        
+        if not product_cards:
+            logger.warning("Карточки товаров не найдены. Пробуем универсальный подход.")
+            # Пробуем найти все div с ссылками и изображениями
+            all_divs = soup.find_all('div')
+            for div in all_divs:
+                if div.find('a') and div.find('img') and div.find(string=True):
+                    product_cards.append(div)
+                    if len(product_cards) >= 20:  # Ограничиваем количество проверок
+                        break
+            logger.info(f"Найдено {len(product_cards)} потенциальных карточек универсальным методом")
+            
+            # Если всё еще ничего не найдено, логируем структуру HTML для отладки
+            if not product_cards:
+                logger.error(f"Карточки товаров не найдены. Первые 1000 символов HTML: {html[:1000]}")
+                # Пробуем найти хотя бы любые ссылки
+                all_links = soup.find_all('a', href=True)
+                logger.warning(f"Найдено {len(all_links)} ссылок на странице")
+                if all_links:
+                    # Берем первые 10 ссылок как потенциальные товары
+                    for link in all_links[:10]:
+                        parent = link.find_parent('div') or link.find_parent('article')
+                        if parent:
+                            product_cards.append(parent)
+                    logger.info(f"Добавлено {len(product_cards)} карточек на основе ссылок")
+        
+        for i, card in enumerate(product_cards):
             try:
                 product = self._extract_product_from_card(card)
+                
+                if not product:
+                    logger.debug(f"Карточка {i+1}: не удалось извлечь данные")
+                    continue
                 
                 # Валидация обязательных полей перед добавлением
                 if self._validate_product_data(product):
                     products.append(product)
+                    logger.debug(f"Карточка {i+1}: товар добавлен - {product.get('name', 'N/A')[:50]}")
                 else:
-                    logger.warning(f"Товар не прошел валидацию: {product.get('name', 'N/A')}")
+                    logger.warning(f"Карточка {i+1}: товар не прошел валидацию - {product.get('name', 'N/A')[:50]}, поля: name={bool(product.get('name'))}, url={bool(product.get('url'))}, source={bool(product.get('source'))}")
                     
             except Exception as e:
-                logger.warning(f"Ошибка обработки карточки товара: {e}")
+                logger.warning(f"Ошибка обработки карточки товара {i+1}: {e}", exc_info=True)
                 continue
+        
+        logger.info(f"Итого извлечено {len(products)} валидных товаров из {len(product_cards)} карточек")
         
         return products
     
     def _extract_product_from_card(self, card) -> Dict[str, Any]:
         """Извлекает данные товара из карточки"""
-        # Название товара
-        name_elem = (
-            card.find('h3') or
-            card.find('a', class_='product-title') or
-            card.find('span', class_='product-name') or
-            card.find('div', class_='title') or
-            card.find('a', href=True)
-        )
-        name = name_elem.get_text(strip=True) if name_elem else ''
+        # Название товара - пробуем разные варианты
+        name = ''
+        name_selectors = [
+            ('h3', None),
+            ('h2', None),
+            ('h4', None),
+            ('a', {'class': lambda x: x and 'product-title' in str(x).lower()}),
+            ('a', {'class': lambda x: x and 'title' in str(x).lower()}),
+            ('span', {'class': lambda x: x and 'product-name' in str(x).lower()}),
+            ('span', {'class': lambda x: x and 'name' in str(x).lower()}),
+            ('div', {'class': lambda x: x and 'title' in str(x).lower()}),
+            ('a', {'href': True}),
+        ]
         
-        # Если название пустое, пропускаем
-        if not name:
+        for tag, attrs in name_selectors:
+            if attrs:
+                name_elem = card.find(tag, attrs) if isinstance(attrs, dict) else card.find(tag, class_=attrs)
+            else:
+                name_elem = card.find(tag)
+            
+            if name_elem:
+                name = name_elem.get_text(strip=True)
+                if name and len(name) > 3:  # Минимальная длина названия
+                    break
+        
+        # Если название не найдено, пробуем взять текст из всей карточки
+        if not name or len(name) < 3:
+            # Находим ссылку и берем её текст или title
+            link = card.find('a', href=True)
+            if link:
+                name = link.get_text(strip=True) or link.get('title', '') or link.get('aria-label', '')
+                if not name:
+                    # Берем href и извлекаем из него
+                    href = link.get('href', '')
+                    import re
+                    match = re.search(r'/([^/]+)/?$', href)
+                    if match:
+                        name = match.group(1).replace('-', ' ').replace('_', ' ')
+        
+        # Если название все еще пустое, пропускаем
+        if not name or len(name) < 3:
+            logger.debug(f"Название товара не найдено в карточке")
             return {}
         
         # URL товара
@@ -102,15 +178,41 @@ class UzumParser(BaseMarketplaceParser):
         # Если URL пустой, создаем из названия (fallback)
         if not url:
             url = f"{self.SEARCH_URL}?query={quote(name[:50])}"
+            logger.debug(f"URL создан из названия (fallback): {url}")
         
-        # Цена
-        price_elem = (
-            card.find('span', class_='price') or
-            card.find('div', class_='price') or
-            card.find('span', {'data-price': True}) or
-            card.find('ins', class_='price')
-        )
-        price_text = price_elem.get_text(strip=True) if price_elem else '0'
+        # Цена - пробуем разные варианты
+        price_text = '0'
+        price_selectors = [
+            ('span', {'class': lambda x: x and 'price' in str(x).lower()}),
+            ('div', {'class': lambda x: x and 'price' in str(x).lower()}),
+            ('span', {'data-price': True}),
+            ('ins', {'class': lambda x: x and 'price' in str(x).lower()}),
+            ('strong', {'class': lambda x: x and 'price' in str(x).lower()}),
+            ('b', {'class': lambda x: x and 'price' in str(x).lower()}),
+        ]
+        
+        for tag, attrs in price_selectors:
+            price_elem = card.find(tag, attrs) if isinstance(attrs, dict) else card.find(tag, class_=attrs)
+            if price_elem:
+                price_text = price_elem.get_text(strip=True)
+                if price_text and re.search(r'\d', price_text):
+                    break
+        
+        # Если цена не найдена, ищем любые числа, похожие на цены
+        if not price_text or price_text == '0':
+            # Ищем все числа в тексте карточки
+            card_text = card.get_text()
+            import re
+            numbers = re.findall(r'\d+[\s,]*\d*', card_text)
+            if numbers:
+                # Берем самое большое число (вероятно это цена)
+                try:
+                    max_num = max([int(re.sub(r'[\s,]', '', n)) for n in numbers if len(n) > 3])
+                    if max_num > 1000:  # Разумная минимальная цена
+                        price_text = str(max_num)
+                except:
+                    pass
+        
         price = self._parse_price(price_text)
         
         # ID товара
@@ -227,12 +329,15 @@ class UzumParser(BaseMarketplaceParser):
         
         for field in required_fields:
             if field not in product:
-                logger.warning(f"Отсутствует обязательное поле: {field}")
+                logger.debug(f"Отсутствует обязательное поле: {field}")
                 return False
             
             value = product[field]
             if not value or (isinstance(value, str) and not value.strip()):
-                logger.warning(f"Поле {field} пустое")
+                # Для URL разрешаем fallback (поисковый запрос)
+                if field == 'url' and self.SEARCH_URL in str(value):
+                    continue
+                logger.debug(f"Поле {field} пустое или невалидное: {value}")
                 return False
         
         # Проверяем типы данных
