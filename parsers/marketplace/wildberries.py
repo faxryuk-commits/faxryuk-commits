@@ -166,16 +166,34 @@ class WildberriesParser(BaseMarketplaceParser):
             web_url = f"{self.BASE_URL}/catalog/0/search.aspx?search={quote(query)}"
             logger.info(f"Пробуем веб-версию: {web_url}")
             
-            response = self._make_request(web_url, headers=web_headers)
-            if response and response.status_code == 200:
-                products = self._extract_products(response.text)
-                if limit:
-                    products = products[:limit]
-                logger.info(f"Веб-версия вернула {len(products)} товаров")
-                return products
-            else:
-                logger.error(f"Не удалось получить ответ от веб-версии, статус: {response.status_code if response else 'None'}")
-                return []
+            # Пробуем веб-версию с retry для 498
+            web_max_retries = 2
+            for web_attempt in range(web_max_retries):
+                response = self._make_request(web_url, headers=web_headers)
+                
+                if response and response.status_code == 200:
+                    products = self._extract_products(response.text)
+                    if limit:
+                        products = products[:limit]
+                    logger.info(f"Веб-версия вернула {len(products)} товаров")
+                    return products
+                elif response and response.status_code == 498:
+                    # Статус 498 - возможная блокировка, ждем и пробуем еще раз
+                    if web_attempt < web_max_retries - 1:
+                        wait_time = base_delay * (web_attempt + 1) * 2
+                        logger.warning(f"Веб-версия вернула 498, жду {wait_time:.1f} секунд перед повтором")
+                        time.sleep(wait_time)
+                        # Переинициализируем сессию
+                        self._init_session()
+                        continue
+                    else:
+                        logger.error(f"Веб-версия вернула 498 после {web_max_retries} попыток - возможная блокировка")
+                        return []
+                else:
+                    logger.error(f"Не удалось получить ответ от веб-версии, статус: {response.status_code if response else 'None'}")
+                    return []
+            
+            return []
         except Exception as e:
             logger.error(f"Ошибка при запросе к веб-версии: {e}", exc_info=True)
             return []
@@ -537,51 +555,134 @@ class WildberriesParser(BaseMarketplaceParser):
                     logger.info("Пробуем извлечь товары из HTML веб-версии")
                     return self._extract_products_from_html(html)
                 else:
-                    # Если это JSON, но товаров нет, логируем всю структуру для отладки
-                    logger.warning(f"Товары не найдены. Полная структура ответа (первые 1000 символов): {str(data)[:1000]}")
+                    # Если это JSON, но товаров нет, делаем глубокий анализ структуры
+                    logger.warning("Товары не найдены в стандартных путях, делаю глубокий анализ структуры ответа")
                     
-                    # Пробуем найти любые массивы в ответе
-                    def find_arrays(obj, path=""):
-                        """Рекурсивно ищем массивы в структуре"""
+                    def find_product_arrays(obj, path="", max_depth=5, current_depth=0):
+                        """Рекурсивно ищем массивы товаров в структуре с ограничением глубины"""
+                        if current_depth >= max_depth:
+                            return []
+                        
                         arrays = []
                         if isinstance(obj, dict):
+                            # Сначала проверяем известные ключи
+                            for known_key in ['products', 'items', 'goods', 'results', 'data', 'value', 'catalog', 'list']:
+                                if known_key in obj:
+                                    val = obj[known_key]
+                                    if isinstance(val, list) and len(val) > 0:
+                                        first = val[0] if val else {}
+                                        if isinstance(first, dict):
+                                            # Проверяем признаки товара
+                                            has_product_signs = any(k in first for k in ['id', 'nmId', 'nm_id', 'goodsId', 'name', 'title', 'brandName', 'price', 'salePriceU', 'priceU'])
+                                            if has_product_signs:
+                                                arrays.append((f"{path}.{known_key}" if path else known_key, val))
+                                    elif isinstance(val, dict):
+                                        arrays.extend(find_product_arrays(val, f"{path}.{known_key}" if path else known_key, max_depth, current_depth + 1))
+                            
+                            # Затем рекурсивно проверяем все ключи
                             for key, value in obj.items():
-                                if isinstance(value, list) and len(value) > 0:
-                                    # Проверяем, похож ли первый элемент на товар
-                                    first = value[0] if value else {}
-                                    if isinstance(first, dict) and any(k in first for k in ['id', 'nmId', 'name', 'title']):
-                                        arrays.append((f"{path}.{key}" if path else key, value))
-                                elif isinstance(value, dict):
-                                    arrays.extend(find_arrays(value, f"{path}.{key}" if path else key))
+                                if key not in ['products', 'items', 'goods', 'results', 'data', 'value', 'catalog', 'list']:
+                                    if isinstance(value, dict):
+                                        arrays.extend(find_product_arrays(value, f"{path}.{key}" if path else key, max_depth, current_depth + 1))
+                                    elif isinstance(value, list) and len(value) > 0:
+                                        first = value[0] if value else {}
+                                        if isinstance(first, dict) and any(k in first for k in ['id', 'nmId', 'name', 'title', 'price']):
+                                            arrays.append((f"{path}.{key}" if path else key, value))
                         elif isinstance(obj, list) and len(obj) > 0:
                             first = obj[0]
-                            if isinstance(first, dict) and any(k in first for k in ['id', 'nmId', 'name', 'title']):
+                            if isinstance(first, dict) and any(k in first for k in ['id', 'nmId', 'name', 'title', 'price']):
                                 arrays.append((path or "root", obj))
+                        
                         return arrays
                     
-                    found_arrays = find_arrays(data)
+                    # Ищем массивы товаров
+                    found_arrays = find_product_arrays(data)
+                    
                     if found_arrays:
-                        logger.info(f"Найдены потенциальные массивы товаров: {[path for path, _ in found_arrays]}")
-                        # Берем первый найденный массив
-                        _, products_data = found_arrays[0]
-                        logger.info(f"Пробуем использовать массив из {found_arrays[0][0]} с {len(products_data)} элементами")
-                        # Обрабатываем найденный массив
-                        for item in products_data[:10]:  # Ограничиваем для теста
-                            try:
-                                product_id = item.get('id') or item.get('nmId') or item.get('nm_id')
-                                name = item.get('name') or item.get('title') or item.get('goodsName') or ''
-                                if name:
+                        logger.info(f"Найдены потенциальные массивы товаров в путях: {[path for path, _ in found_arrays]}")
+                        
+                        # Сортируем по приоритету (известные ключи в начале)
+                        priority_keys = ['products', 'items', 'goods', 'results', 'data']
+                        found_arrays.sort(key=lambda x: (
+                            0 if any(pk in x[0] for pk in priority_keys) else 1,
+                            len(x[1])  # Больше элементов = выше приоритет
+                        ), reverse=True)
+                        
+                        # Пробуем каждый найденный массив
+                        for path, products_data in found_arrays:
+                            logger.info(f"Пробуем использовать массив из '{path}' с {len(products_data)} элементами")
+                            processed_count = 0
+                            
+                            for item in products_data:
+                                try:
+                                    if not isinstance(item, dict):
+                                        continue
+                                    
+                                    # Пробуем разные варианты ключей для всех полей
+                                    product_id = (
+                                        item.get('id') or item.get('nmId') or item.get('nm_id') or 
+                                        item.get('goodsId') or item.get('goods_id') or
+                                        item.get('productId') or item.get('product_id')
+                                    )
+                                    
+                                    name = (
+                                        item.get('name') or item.get('title') or 
+                                        item.get('goodsName') or item.get('productName') or
+                                        item.get('brandName') or item.get('brand_name') or
+                                        ''
+                                    )
+                                    
+                                    if not name or len(name.strip()) < 2:
+                                        continue
+                                    
+                                    # Цена
+                                    price = 0
+                                    for price_key in ['salePriceU', 'priceU', 'price', 'salePrice', 'finalPrice', 'priceWithDiscount', 'cost']:
+                                        if price_key in item:
+                                            price_val = item[price_key]
+                                            if isinstance(price_val, (int, float)):
+                                                # Если цена в копейках (больше 1000), делим на 100
+                                                price = price_val / 100 if price_val > 1000 else price_val
+                                                break
+                                    
+                                    # Формируем URL
+                                    url = ''
+                                    if product_id:
+                                        url = f"{self.BASE_URL}/catalog/{product_id}/detail.aspx"
+                                    else:
+                                        url = f"{self.BASE_URL}/catalog/0/search.aspx?search={quote(name[:50])}"
+                                    
                                     product = {
                                         'id': str(product_id) if product_id else None,
                                         'name': name.strip(),
-                                        'price': float(item.get('price', 0) or item.get('salePriceU', 0) / 100 if item.get('salePriceU') else 0),
-                                        'url': f"{self.BASE_URL}/catalog/{product_id}/detail.aspx" if product_id else f"{self.BASE_URL}/catalog/0/search.aspx?search={quote(name[:50])}",
+                                        'price': float(price),
+                                        'rating': float(item.get('rating', 0) or item.get('reviewRating', 0) or 0),
+                                        'reviews_count': int(item.get('feedbacks', 0) or item.get('reviewCount', 0) or 0),
+                                        'url': url,
+                                        'image_url': self._get_image_url(product_id, item.get('root')) if product_id else '',
+                                        'brand': item.get('brand') or item.get('brandName') or None,
                                         'source': 'wildberries'
                                     }
+                                    
                                     if self.validate_data(product):
                                         products.append(product)
-                            except:
-                                continue
+                                        processed_count += 1
+                                        
+                                        # Ограничиваем для теста
+                                        if processed_count >= 10:
+                                            break
+                                except Exception as e:
+                                    logger.debug(f"Ошибка обработки элемента из {path}: {e}")
+                                    continue
+                            
+                            # Если нашли товары, используем этот массив
+                            if products:
+                                logger.info(f"Успешно извлечено {len(products)} товаров из массива '{path}'")
+                                break
+                    else:
+                        # Если ничего не найдено, логируем структуру для анализа
+                        logger.warning(f"Товары не найдены ни в одном массиве. Структура ответа (первые 500 символов): {str(data)[:500]}")
+                        logger.debug(f"Корневые ключи: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}")
             
             return products
             
