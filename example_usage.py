@@ -123,6 +123,22 @@ def example_storage():
     print(f"Всего организаций в хранилище: {len(all_orgs)}")
 
 
+def example_uzum():
+    """Пример парсинга Uzum Market"""
+    print("\n" + "=" * 50)
+    print("Парсинг Uzum Market")
+    print("=" * 50)
+    
+    parser = UzumParser(delay=2.0)
+    products = parser.parse_search("телефон", limit=5)
+    
+    print(f"Найдено товаров: {len(products)}")
+    for product in products[:3]:
+        print(f"\nТовар: {product.get('name', 'N/A')}")
+        print(f"Цена: {product.get('price', 0):.0f} сум")
+        print(f"Рейтинг: {product.get('rating', 0)}")
+
+
 if __name__ == "__main__":
     print("🚀 Запуск примеров парсинга\n")
     print("⚠️  Внимание: Парсинг может занять некоторое время из-за задержек между запросами\n")
@@ -131,6 +147,7 @@ if __name__ == "__main__":
         # Раскомментируйте нужные примеры
         # example_wildberries()
         # example_ozon()
+        # example_uzum()
         # example_yandex_maps()
         # example_2gis()
         # example_google_maps()
