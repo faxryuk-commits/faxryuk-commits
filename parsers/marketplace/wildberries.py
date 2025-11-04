@@ -132,8 +132,11 @@ class WildberriesParser(BaseMarketplaceParser):
                                         logger.info(f"Пробуем получить товары через shardKey: {shard_key}")
                                         shard_url = f"https://catalog.wb.ru/{shard_key}/v4/filters"
                                         
-                                        # Альтернативный способ - используем другой API endpoint
-                                        alt_url = f"https://search.wb.ru/exactmatch/ru/common/v4/search?query={quote(query)}&resultset=catalog&limit={rs}&appType=1&dest=-1257786&curr=rub&lang=ru&locale=ru&sort=popular&page=1"
+                                        # Альтернативный способ - используем другой формат запроса без некоторых параметров
+                                        alt_url = f"https://search.wb.ru/exactmatch/ru/common/v4/search?query={quote(query)}&resultset=catalog&limit={rs}&sort=popular&page=1&appType=1&curr=rub&dest=-1257786"
+                                        
+                                        # Также пробуем через catalog endpoint
+                                        catalog_url = f"https://catalog.wb.ru/v2/search?query={quote(query)}&limit={rs}&sort=popular"
                                         
                                         # Пробуем альтернативный endpoint
                                         alt_response = self._make_request(alt_url, headers=api_headers)
@@ -144,6 +147,16 @@ class WildberriesParser(BaseMarketplaceParser):
                                                 if limit:
                                                     alt_products = alt_products[:limit]
                                                 return alt_products
+                                        
+                                        # Пробуем catalog endpoint
+                                        catalog_response = self._make_request(catalog_url, headers=api_headers)
+                                        if catalog_response and catalog_response.status_code == 200:
+                                            catalog_products = self._extract_products(catalog_response.text)
+                                            if catalog_products:
+                                                logger.info(f"Catalog endpoint вернул {len(catalog_products)} товаров")
+                                                if limit:
+                                                    catalog_products = catalog_products[:limit]
+                                                return catalog_products
                             except Exception as e:
                                 logger.debug(f"Ошибка при попытке использовать shardKey: {e}")
                             
