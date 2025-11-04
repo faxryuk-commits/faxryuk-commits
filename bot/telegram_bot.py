@@ -113,19 +113,36 @@ class TelegramBot:
             products = parser.parse_search(query, limit=10)
             
             if not products:
-                await message.answer("❌ Товары не найдены")
+                await message.answer(
+                    "❌ Товары не найдены\n\n"
+                    "Возможные причины:\n"
+                    "• Запрос не дал результатов\n"
+                    "• Временные проблемы с API\n"
+                    "• Попробуйте другой запрос"
+                )
+                logger.warning(f"Товары не найдены для запроса: {query}")
                 return
             
             # Сохранение
-            product_models = [Product(**p) for p in products if p.get('name')]
-            self.storage.save_products(product_models)
+            try:
+                product_models = [Product(**p) for p in products if p.get('name')]
+                self.storage.save_products(product_models)
+            except Exception as e:
+                logger.error(f"Ошибка сохранения: {e}")
             
             # Отправка результатов
             text = f"✅ Найдено товаров: {len(products)}\n\n"
             for i, product in enumerate(products[:5], 1):
-                text += f"{i}. <b>{product.get('name', 'N/A')[:50]}</b>\n"
-                text += f"   💰 {product.get('price', 0):.0f} ₽\n"
-                text += f"   ⭐ {product.get('rating', 0)}\n\n"
+                name = product.get('name', 'N/A')[:50]
+                price = product.get('price', 0)
+                rating = product.get('rating', 0)
+                
+                text += f"{i}. <b>{name}</b>\n"
+                if price > 0:
+                    text += f"   💰 {price:.0f} ₽\n"
+                if rating > 0:
+                    text += f"   ⭐ {rating}\n"
+                text += "\n"
             
             if len(products) > 5:
                 text += f"... и еще {len(products) - 5} товаров\n"
@@ -134,7 +151,7 @@ class TelegramBot:
             await message.answer(text, parse_mode="HTML")
             
         except Exception as e:
-            logger.error(f"Ошибка парсинга Wildberries: {e}")
+            logger.error(f"Ошибка парсинга Wildberries: {e}", exc_info=True)
             await message.answer(f"❌ Ошибка: {str(e)}")
     
     async def cmd_ozon(self, message: Message):
