@@ -56,6 +56,18 @@ class BaseMapsParser(BaseParser):
         
         return self._extract_organization_details(response.text)
     
+    def get_organization_full_info(self, org_url: str) -> Optional[Dict[str, Any]]:
+        """
+        Получает полную информацию об организации включая email
+        
+        Args:
+            org_url: URL организации
+        
+        Returns:
+            Детали организации с email и телефонами
+        """
+        return self.get_organization_details(org_url)
+    
     def _build_search_url(self, query: str, location: Optional[str] = None) -> str:
         """Формирует URL для поиска. Должен быть переопределен"""
         raise NotImplementedError
