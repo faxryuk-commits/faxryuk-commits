@@ -118,6 +118,35 @@ class WildberriesParser(BaseMarketplaceParser):
                             return products
                         else:
                             logger.warning("API вернул 200, но товары не найдены в ответе")
+                            
+                            # Пробуем использовать shardKey для получения товаров из другого endpoint
+                            try:
+                                import json
+                                data = json.loads(response.text)
+                                if isinstance(data, dict) and 'shardKey' in data:
+                                    shard_key = data.get('shardKey', '')
+                                    rs = data.get('rs', 100)
+                                    
+                                    # Пробуем получить товары через shard endpoint
+                                    if shard_key and 'presets/' in shard_key:
+                                        logger.info(f"Пробуем получить товары через shardKey: {shard_key}")
+                                        shard_url = f"https://catalog.wb.ru/{shard_key}/v4/filters"
+                                        
+                                        # Альтернативный способ - используем другой API endpoint
+                                        alt_url = f"https://search.wb.ru/exactmatch/ru/common/v4/search?query={quote(query)}&resultset=catalog&limit={rs}&appType=1&dest=-1257786&curr=rub&lang=ru&locale=ru&sort=popular&page=1"
+                                        
+                                        # Пробуем альтернативный endpoint
+                                        alt_response = self._make_request(alt_url, headers=api_headers)
+                                        if alt_response and alt_response.status_code == 200:
+                                            alt_products = self._extract_products(alt_response.text)
+                                            if alt_products:
+                                                logger.info(f"Альтернативный endpoint вернул {len(alt_products)} товаров")
+                                                if limit:
+                                                    alt_products = alt_products[:limit]
+                                                return alt_products
+                            except Exception as e:
+                                logger.debug(f"Ошибка при попытке использовать shardKey: {e}")
+                            
                             # Пробуем веб-версию как fallback
                             break
                     elif response.status_code == 429:
@@ -177,21 +206,31 @@ class WildberriesParser(BaseMarketplaceParser):
                         products = products[:limit]
                     logger.info(f"Веб-версия вернула {len(products)} товаров")
                     return products
-                elif response and response.status_code == 498:
-                    # Статус 498 - возможная блокировка, ждем и пробуем еще раз
-                    if web_attempt < web_max_retries - 1:
-                        wait_time = base_delay * (web_attempt + 1) * 2
-                        logger.warning(f"Веб-версия вернула 498, жду {wait_time:.1f} секунд перед повтором")
-                        time.sleep(wait_time)
-                        # Переинициализируем сессию
-                        self._init_session()
-                        continue
-                    else:
-                        logger.error(f"Веб-версия вернула 498 после {web_max_retries} попыток - возможная блокировка")
-                        return []
-                else:
-                    logger.error(f"Не удалось получить ответ от веб-версии, статус: {response.status_code if response else 'None'}")
-                    return []
+                                 elif response and response.status_code == 498:
+                     # Статус 498 - возможная блокировка, ждем и пробуем еще раз
+                     if web_attempt < web_max_retries - 1:
+                         wait_time = base_delay * (web_attempt + 1) * 2
+                         logger.warning(f"Веб-версия вернула 498, жду {wait_time:.1f} секунд перед повтором")
+                         time.sleep(wait_time)
+                         # Переинициализируем сессию
+                         self._init_session()
+                         continue
+                     else:
+                         logger.error(f"Веб-версия вернула 498 после {web_max_retries} попыток - возможная блокировка")
+                         return []
+                 elif not response:
+                     # Response = None означает, что произошла ошибка
+                     if web_attempt < web_max_retries - 1:
+                         wait_time = base_delay * (web_attempt + 1)
+                         logger.warning(f"Веб-версия вернула None (ошибка), жду {wait_time:.1f} секунд перед повтором")
+                         time.sleep(wait_time)
+                         continue
+                     else:
+                         logger.error("Не удалось получить ответ от веб-версии после всех попыток")
+                         return []
+                 else:
+                     logger.error(f"Не удалось получить ответ от веб-версии, статус: {response.status_code}")
+                     return []
             
             return []
         except Exception as e:
