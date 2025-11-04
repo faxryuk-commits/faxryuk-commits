@@ -352,7 +352,7 @@ class WildberriesParser(BaseMarketplaceParser):
                         break
             
             if products_data:
-                logger.info(f"Найдено {len(products_data)} товаров в ответе API (путь: {key if 'key' in locals() else 'unknown'})")
+                logger.info(f"Найдено {len(products_data)} товаров в ответе API")
                 for item in products_data:
                     try:
                         # Пробуем разные варианты ключей для ID
