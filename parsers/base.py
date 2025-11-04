@@ -124,6 +124,49 @@ class BaseParser(ABC):
         pass
     
     def validate_data(self, data: Dict[str, Any]) -> bool:
-        """Валидация данных перед сохранением"""
-        return data is not None and isinstance(data, dict)
+        """
+        Валидация данных перед сохранением
+        
+        Проверяет наличие обязательных полей и их типы:
+        - Для Product: name (str), url (str), source (str)
+        - Для Organization: name (str), source (str)
+        """
+        if not data or not isinstance(data, dict):
+            return False
+        
+        # Определяем тип данных по полю source или другим признакам
+        source = data.get('source', '').lower()
+        
+        # Валидация для Product
+        if source in ['wildberries', 'ozon', 'uzum'] or 'price' in data:
+            required_fields = ['name', 'url', 'source']
+            for field in required_fields:
+                if field not in data:
+                    return False
+                value = data[field]
+                if not value or (isinstance(value, str) and not value.strip()):
+                    return False
+            # Проверяем типы
+            if not isinstance(data.get('name'), str):
+                return False
+            if not isinstance(data.get('url'), str):
+                return False
+            if not isinstance(data.get('source'), str):
+                return False
+        
+        # Валидация для Organization
+        elif source in ['google_maps', 'yandex_maps', '2gis'] or 'coordinates' in data:
+            required_fields = ['name', 'source']
+            for field in required_fields:
+                if field not in data:
+                    return False
+                value = data[field]
+                if not value or (isinstance(value, str) and not value.strip()):
+                    return False
+            if not isinstance(data.get('name'), str):
+                return False
+            if not isinstance(data.get('source'), str):
+                return False
+        
+        return True
 
