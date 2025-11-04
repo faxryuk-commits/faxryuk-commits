@@ -236,18 +236,39 @@ class WildberriesParser(BaseMarketplaceParser):
                                 pass
                     
                     if name and product_id:
+                        # Формируем URL
+                        url = ''
+                        if product_id:
+                            url = f"{self.BASE_URL}/catalog/{product_id}/detail.aspx"
+                        else:
+                            # Пробуем найти ссылку
+                            link = card.find('a', href=True)
+                            if link:
+                                href = link.get('href', '')
+                                if href.startswith('http'):
+                                    url = href
+                                elif href.startswith('/'):
+                                    url = f"{self.BASE_URL}{href}"
+                            # Fallback
+                            if not url and name:
+                                url = f"{self.BASE_URL}/catalog/0/search.aspx?search={quote(name[:50])}"
+                        
                         product = {
-                            'id': str(product_id),
-                            'name': name,
+                            'id': str(product_id) if product_id else None,
+                            'name': name.strip() if name else '',
                             'brand': '',
                             'price': price,
                             'rating': rating,
                             'reviews_count': 0,
-                            'url': f"{self.BASE_URL}/catalog/{product_id}/detail.aspx",
+                            'url': url,
                             'image_url': '',
                             'source': 'wildberries'
                         }
-                        products.append(product)
+                        
+                        if self.validate_data(product) and name:
+                            products.append(product)
+                        else:
+                            logger.debug(f"Товар не прошел валидацию: name={bool(name)}, url={bool(url)}")
                         
                 except Exception as e:
                     logger.warning(f"Ошибка обработки карточки: {e}")
