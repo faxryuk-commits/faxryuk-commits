@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -57,6 +57,39 @@ class TelegramBot:
         
         # Обработка инлайн-кнопок
         self.dp.callback_query()(self.handle_callback)
+    
+    def _validate_and_normalize_product(self, product: Dict[str, Any]) -> Optional[Product]:
+        """
+        Валидирует и нормализует данные товара перед созданием модели Product
+        
+        Returns:
+            Product объект или None, если данные невалидны
+        """
+        # Проверяем обязательные поля
+        if not product.get('name') or not product.get('url') or not product.get('source'):
+            logger.warning(f"Товар пропущен из-за отсутствия обязательных полей: {product}")
+            return None
+        
+        try:
+            # Нормализуем данные
+            normalized = {
+                'id': product.get('id'),
+                'name': str(product.get('name', '')).strip(),
+                'brand': product.get('brand'),
+                'price': float(product.get('price', 0)),
+                'rating': float(product.get('rating', 0)),
+                'reviews_count': int(product.get('reviews_count', 0)),
+                'url': str(product.get('url', '')).strip(),
+                'image_url': product.get('image_url'),
+                'description': product.get('description'),
+                'characteristics': product.get('characteristics', {}),
+                'source': str(product.get('source', '')).strip(),
+            }
+            
+            return Product(**normalized)
+        except Exception as e:
+            logger.warning(f"Ошибка создания модели Product: {e}, данные: {product}")
+            return None
     
     async def cmd_start(self, message: Message):
         """Обработчик команды /start"""
@@ -126,10 +159,16 @@ class TelegramBot:
                 logger.warning(f"Товары не найдены для запроса: {query}")
                 return
             
-            # Сохранение
+            # Сохранение с валидацией
             try:
-                product_models = [Product(**p) for p in products if p.get('name')]
-                self.storage.save_products(product_models)
+                product_models = []
+                for p in products:
+                    product = self._validate_and_normalize_product(p)
+                    if product:
+                        product_models.append(product)
+                
+                if product_models:
+                    self.storage.save_products(product_models)
             except Exception as e:
                 logger.error(f"Ошибка сохранения: {e}")
             
@@ -174,8 +213,15 @@ class TelegramBot:
                 await message.answer("❌ Товары не найдены")
                 return
             
-            product_models = [Product(**p) for p in products if p.get('name')]
-            self.storage.save_products(product_models)
+            # Сохранение с валидацией
+            product_models = []
+            for p in products:
+                product = self._validate_and_normalize_product(p)
+                if product:
+                    product_models.append(product)
+            
+            if product_models:
+                self.storage.save_products(product_models)
             
             text = f"✅ Найдено товаров: {len(products)}\n\n"
             for i, product in enumerate(products[:5], 1):
@@ -216,10 +262,16 @@ class TelegramBot:
                 logger.warning(f"Товары не найдены для запроса: {query}")
                 return
             
-            # Сохранение
+            # Сохранение с валидацией
             try:
-                product_models = [Product(**p) for p in products if p.get('name')]
-                self.storage.save_products(product_models)
+                product_models = []
+                for p in products:
+                    product = self._validate_and_normalize_product(p)
+                    if product:
+                        product_models.append(product)
+                
+                if product_models:
+                    self.storage.save_products(product_models)
             except Exception as e:
                 logger.error(f"Ошибка сохранения: {e}")
             
