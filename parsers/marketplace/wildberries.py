@@ -113,6 +113,8 @@ class WildberriesParser(BaseMarketplaceParser):
                             if limit:
                                 products = products[:limit]
                             logger.info(f"Получено товаров: {len(products)}")
+                            # Небольшая задержка после успешного запроса для стабильности
+                            time.sleep(0.5)
                             return products
                         else:
                             logger.warning("API вернул 200, но товары не найдены в ответе")
