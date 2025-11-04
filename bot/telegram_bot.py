@@ -8,7 +8,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
-from parsers.marketplace import WildberriesParser, OzonParser
+from parsers.marketplace import WildberriesParser, OzonParser, UzumParser
 from parsers.maps import GoogleMapsParser, YandexMapsParser, TwoGISParser
 from models.data_models import Product, Organization
 from storage import JSONStorage
@@ -44,6 +44,7 @@ class TelegramBot:
         # Команды маркетплейсов
         self.dp.message(Command("wb"))(self.cmd_wildberries)
         self.dp.message(Command("ozon"))(self.cmd_ozon)
+        self.dp.message(Command("uzum"))(self.cmd_uzum)
         
         # Команды карт
         self.dp.message(Command("yandex"))(self.cmd_yandex_maps)
@@ -81,6 +82,7 @@ class TelegramBot:
 <b>Маркетплейсы:</b>
 /wb <i>запрос</i> - Поиск на Wildberries
 /ozon <i>запрос</i> - Поиск на Ozon
+/uzum <i>запрос</i> - Поиск на Uzum Market
 
 <b>Карты:</b>
 /yandex <i>запрос [город]</i> - Поиск в Яндекс.Картах
