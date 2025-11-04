@@ -80,6 +80,9 @@ class WildberriesParser(BaseMarketplaceParser):
         max_retries = 3
         retry_delay = 2  # секунды
         
+        # Используем delay из базового класса, но не менее 1 секунды
+        base_delay = max(self.delay, 1.0)
+        
         for attempt in range(max_retries):
             try:
                 # Сначала пробуем API
@@ -116,15 +119,18 @@ class WildberriesParser(BaseMarketplaceParser):
                             # Пробуем веб-версию как fallback
                             break
                     elif response.status_code == 429:
-                        # Rate limit - ждем дольше
-                        wait_time = retry_delay * (attempt + 1) * 2
-                        logger.warning(f"Rate limit (429), жду {wait_time} секунд перед повтором")
+                        # Rate limit - ждем дольше с экспоненциальной задержкой
+                        wait_time = base_delay * (2 ** (attempt + 1))
+                        logger.warning(f"Rate limit (429), жду {wait_time:.1f} секунд перед повтором")
                         time.sleep(wait_time)
+                        # Переинициализируем сессию после rate limit
+                        self._init_session()
                         continue
                     elif response.status_code in [498, 403, 503]:
                         # Временные проблемы - ждем и пробуем снова
-                        logger.warning(f"API вернул статус {response.status_code}, жду {retry_delay} секунд перед повтором")
-                        time.sleep(retry_delay)
+                        wait_time = base_delay * (attempt + 1)
+                        logger.warning(f"API вернул статус {response.status_code}, жду {wait_time:.1f} секунд перед повтором")
+                        time.sleep(wait_time)
                         continue
                     else:
                         logger.warning(f"API вернул статус {response.status_code}")
@@ -137,7 +143,9 @@ class WildberriesParser(BaseMarketplaceParser):
             except Exception as e:
                 logger.error(f"Ошибка при запросе к API (попытка {attempt + 1}): {e}")
                 if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
+                    wait_time = base_delay * (attempt + 1)
+                    logger.info(f"Жду {wait_time:.1f} секунд перед следующей попыткой")
+                    time.sleep(wait_time)
                     continue
                 else:
                     logger.warning("Все попытки API исчерпаны, пробуем веб-версию")
