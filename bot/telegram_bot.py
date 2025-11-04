@@ -192,6 +192,61 @@ class TelegramBot:
             logger.error(f"Ошибка парсинга Ozon: {e}")
             await message.answer(f"❌ Ошибка: {str(e)}")
     
+    async def cmd_uzum(self, message: Message):
+        """Парсинг Uzum Market"""
+        query = message.text.replace("/uzum", "").strip()
+        if not query:
+            await message.answer("❌ Укажите запрос. Пример: /uzum телефон")
+            return
+        
+        await message.answer(f"⏳ Ищу товары на Uzum Market по запросу: <b>{query}</b>", parse_mode="HTML")
+        
+        try:
+            parser = UzumParser(delay=1.5)
+            products = parser.parse_search(query, limit=10)
+            
+            if not products:
+                await message.answer(
+                    "❌ Товары не найдены\n\n"
+                    "Возможные причины:\n"
+                    "• Запрос не дал результатов\n"
+                    "• Временные проблемы с сайтом\n"
+                    "• Попробуйте другой запрос"
+                )
+                logger.warning(f"Товары не найдены для запроса: {query}")
+                return
+            
+            # Сохранение
+            try:
+                product_models = [Product(**p) for p in products if p.get('name')]
+                self.storage.save_products(product_models)
+            except Exception as e:
+                logger.error(f"Ошибка сохранения: {e}")
+            
+            # Отправка результатов
+            text = f"✅ Найдено товаров: {len(products)}\n\n"
+            for i, product in enumerate(products[:5], 1):
+                name = product.get('name', 'N/A')[:50]
+                price = product.get('price', 0)
+                rating = product.get('rating', 0)
+                
+                text += f"{i}. <b>{name}</b>\n"
+                if price > 0:
+                    text += f"   💰 {price:.0f} сум\n"
+                if rating > 0:
+                    text += f"   ⭐ {rating}\n"
+                text += "\n"
+            
+            if len(products) > 5:
+                text += f"... и еще {len(products) - 5} товаров\n"
+            
+            text += "\n✅ Данные сохранены!"
+            await message.answer(text, parse_mode="HTML")
+            
+        except Exception as e:
+            logger.error(f"Ошибка парсинга Uzum Market: {e}", exc_info=True)
+            await message.answer(f"❌ Ошибка: {str(e)}")
+    
     async def cmd_yandex_maps(self, message: Message):
         """Парсинг Яндекс.Карт"""
         parts = message.text.replace("/yandex", "").strip().split(maxsplit=1)
