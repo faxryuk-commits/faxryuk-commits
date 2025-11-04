@@ -49,14 +49,21 @@ class BaseParser(ABC):
         session.mount("http://", adapter)
         session.mount("https://", adapter)
         
-        # Настройка заголовков
+        # Настройка заголовков (имитация реального браузера)
+        user_agent = self.ua.random
         session.headers.update({
-            'User-Agent': self.ua.random,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+            'DNT': '1',
         })
         
         return session
@@ -65,10 +72,16 @@ class BaseParser(ABC):
         self,
         url: str,
         method: str = "GET",
+        headers: Optional[Dict[str, str]] = None,
         **kwargs
     ) -> Optional[requests.Response]:
         """Выполняет HTTP запрос с обработкой ошибок"""
         try:
+            # Объединяем заголовки: базовые + дополнительные
+            request_headers = self.session.headers.copy()
+            if headers:
+                request_headers.update(headers)
+            
             # Применяем прокси если нужно
             if self.use_proxy and self.proxy:
                 kwargs['proxies'] = {
@@ -79,9 +92,15 @@ class BaseParser(ABC):
             response = self.session.request(
                 method=method,
                 url=url,
+                headers=request_headers,
                 timeout=self.timeout,
                 **kwargs
             )
+            
+            # Логируем статус для отладки
+            if response.status_code != 200:
+                logger.warning(f"Запрос к {url} вернул статус {response.status_code}")
+            
             response.raise_for_status()
             
             # Задержка между запросами
@@ -89,6 +108,12 @@ class BaseParser(ABC):
             
             return response
             
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP ошибка запроса к {url}: {e} (статус: {e.response.status_code if hasattr(e, 'response') else 'unknown'})")
+            # Возвращаем response даже при ошибке для анализа
+            if hasattr(e, 'response'):
+                return e.response
+            return None
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка запроса к {url}: {e}")
             return None

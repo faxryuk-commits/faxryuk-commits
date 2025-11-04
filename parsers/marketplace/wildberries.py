@@ -12,9 +12,15 @@ class WildberriesParser(BaseMarketplaceParser):
     def __init__(self, **kwargs):
         super().__init__(base_url=self.BASE_URL, **kwargs)
         # Добавляем специфичные заголовки для Wildberries API
+        # Wildberries требует определенные заголовки для работы API
         self.session.headers.update({
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'ru-RU,ru;q=0.9',
+            'Origin': 'https://www.wildberries.ru',
+            'Referer': 'https://www.wildberries.ru/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
         })
     
     def parse_search(
@@ -38,14 +44,33 @@ class WildberriesParser(BaseMarketplaceParser):
         # Сначала пробуем API
         url = self._build_search_url(query)
         logger.info(f"Запрос к Wildberries API: {url}")
-        response = self._make_request(url)
         
-        if not response:
+        # Устанавливаем правильные заголовки для API запроса
+        api_headers = {
+            'Accept': 'application/json',
+            'Referer': f'{self.BASE_URL}/',
+            'Origin': self.BASE_URL,
+        }
+        
+        response = self._make_request(url, headers=api_headers)
+        
+        # Проверяем статус ответа
+        if response:
+            logger.info(f"Статус ответа API: {response.status_code}")
+            if response.status_code != 200:
+                logger.warning(f"API вернул статус {response.status_code}")
+        
+        if not response or response.status_code != 200:
             logger.warning("Не удалось получить ответ от API, пробуем веб-версию")
-            # Fallback на веб-версию
+            # Fallback на веб-версию с правильными заголовками
+            web_headers = {
+                'Accept': 'text/html,application/xhtml+xml',
+                'Referer': f'{self.BASE_URL}/',
+            }
             web_url = f"{self.BASE_URL}/catalog/0/search.aspx?search={quote(query)}"
-            response = self._make_request(web_url)
+            response = self._make_request(web_url, headers=web_headers)
             if not response:
+                logger.error("Не удалось получить ответ от веб-версии")
                 return []
         
         products = self._extract_products(response.text)

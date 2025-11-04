@@ -16,8 +16,13 @@ class YandexMapsParser(BaseMapsParser):
         super().__init__(base_url=self.BASE_URL, **kwargs)
         # Яндекс.Карты требуют специальные заголовки
         self.session.headers.update({
-            'Referer': 'https://yandex.ru/maps/',
-            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9',
+            'Referer': 'https://yandex.ru/',
+            'Origin': 'https://yandex.ru',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
         })
     
     def _build_search_url(self, query: str, location: Optional[str] = None) -> str:
