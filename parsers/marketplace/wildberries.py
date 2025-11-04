@@ -145,6 +145,9 @@ class WildberriesParser(BaseMarketplaceParser):
         
         # Fallback на веб-версию
         try:
+            # Задержка перед веб-версией для стабильности
+            time.sleep(1)
+            
             web_headers = {
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': 'ru-RU,ru;q=0.9',
@@ -161,10 +164,10 @@ class WildberriesParser(BaseMarketplaceParser):
                 logger.info(f"Веб-версия вернула {len(products)} товаров")
                 return products
             else:
-                logger.error("Не удалось получить ответ от веб-версии")
+                logger.error(f"Не удалось получить ответ от веб-версии, статус: {response.status_code if response else 'None'}")
                 return []
         except Exception as e:
-            logger.error(f"Ошибка при запросе к веб-версии: {e}")
+            logger.error(f"Ошибка при запросе к веб-версии: {e}", exc_info=True)
             return []
     
     def _build_search_url(self, query: str) -> str:
