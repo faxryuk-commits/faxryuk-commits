@@ -146,7 +146,9 @@ class TelegramBot:
         
         try:
             parser = WildberriesParser(delay=1.5)
+            logger.info(f"Начинаю парсинг Wildberries для запроса: {query}")
             products = parser.parse_search(query, limit=10)
+            logger.info(f"Парсер вернул {len(products)} товаров")
             
             if not products:
                 await message.answer(
@@ -207,7 +209,9 @@ class TelegramBot:
         
         try:
             parser = OzonParser(delay=1.5)
+            logger.info(f"Начинаю парсинг Ozon для запроса: {query}")
             products = parser.parse_search(query, limit=10)
+            logger.info(f"Парсер вернул {len(products)} товаров")
             
             if not products:
                 await message.answer("❌ Товары не найдены")
@@ -249,7 +253,9 @@ class TelegramBot:
         
         try:
             parser = UzumParser(delay=1.5)
+            logger.info(f"Начинаю парсинг Uzum Market для запроса: {query}")
             products = parser.parse_search(query, limit=10)
+            logger.info(f"Парсер вернул {len(products)} товаров")
             
             if not products:
                 await message.answer(
