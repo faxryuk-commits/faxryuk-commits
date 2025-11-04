@@ -150,6 +150,12 @@ class TelegramBot:
             products = parser.parse_search(query, limit=10)
             logger.info(f"Парсер вернул {len(products)} товаров")
             
+            # Детальное логирование первых товаров для отладки
+            if products:
+                logger.info(f"Первый товар: {products[0]}")
+            else:
+                logger.warning("Парсер вернул пустой список товаров")
+            
             if not products:
                 await message.answer(
                     "❌ Товары не найдены\n\n"
@@ -256,6 +262,12 @@ class TelegramBot:
             logger.info(f"Начинаю парсинг Uzum Market для запроса: {query}")
             products = parser.parse_search(query, limit=10)
             logger.info(f"Парсер вернул {len(products)} товаров")
+            
+            # Детальное логирование первых товаров для отладки
+            if products:
+                logger.info(f"Первый товар: {products[0]}")
+            else:
+                logger.warning("Парсер вернул пустой список товаров")
             
             if not products:
                 await message.answer(
