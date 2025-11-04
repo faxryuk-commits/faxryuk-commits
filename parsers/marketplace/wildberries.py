@@ -22,6 +22,23 @@ class WildberriesParser(BaseMarketplaceParser):
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-site',
         })
+        # Инициализируем сессию - получаем куки с главной страницы
+        self._init_session()
+    
+    def _init_session(self):
+        """Инициализирует сессию, получая куки с главной страницы"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Делаем запрос на главную страницу для получения кук
+            response = self.session.get(self.BASE_URL, timeout=10)
+            if response.status_code == 200:
+                logger.info("Сессия Wildberries инициализирована, куки получены")
+            else:
+                logger.warning(f"Не удалось получить куки, статус: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"Ошибка инициализации сессии: {e}")
     
     def parse_search(
         self,
