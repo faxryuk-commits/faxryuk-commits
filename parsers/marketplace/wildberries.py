@@ -29,13 +29,30 @@ class WildberriesParser(BaseMarketplaceParser):
     def _init_session(self):
         """Инициализирует сессию, получая куки с главной страницы"""
         import logging
+        import time
         logger = logging.getLogger(__name__)
         
         try:
             # Делаем запрос на главную страницу для получения кук
-            response = self.session.get(self.BASE_URL, timeout=10)
+            headers = {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            response = self.session.get(self.BASE_URL, headers=headers, timeout=15)
             if response.status_code == 200:
                 logger.info("Сессия Wildberries инициализирована, куки получены")
+                # Небольшая задержка для стабильности
+                time.sleep(0.5)
+            elif response.status_code == 429:
+                logger.warning("Rate limit при инициализации, жду 5 секунд")
+                time.sleep(5)
+                # Пробуем еще раз
+                response = self.session.get(self.BASE_URL, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    logger.info("Сессия инициализирована после ожидания")
             else:
                 logger.warning(f"Не удалось получить куки, статус: {response.status_code}")
         except Exception as e:
@@ -47,7 +64,7 @@ class WildberriesParser(BaseMarketplaceParser):
         limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        Парсит результаты поиска
+        Парсит результаты поиска с retry логикой
         
         Args:
             query: Поисковый запрос
@@ -57,47 +74,98 @@ class WildberriesParser(BaseMarketplaceParser):
             Список товаров
         """
         import logging
+        import time
         logger = logging.getLogger(__name__)
         
-        # Сначала пробуем API
-        url = self._build_search_url(query)
-        logger.info(f"Запрос к Wildberries API: {url}")
+        max_retries = 3
+        retry_delay = 2  # секунды
         
-        # Устанавливаем правильные заголовки для API запроса
-        api_headers = {
-            'Accept': 'application/json',
-            'Referer': f'{self.BASE_URL}/',
-            'Origin': self.BASE_URL,
-        }
+        for attempt in range(max_retries):
+            try:
+                # Сначала пробуем API
+                url = self._build_search_url(query)
+                logger.info(f"Запрос к Wildberries API (попытка {attempt + 1}/{max_retries}): {url}")
+                
+                # Устанавливаем правильные заголовки для API запроса
+                api_headers = {
+                    'Accept': 'application/json',
+                    'Accept-Language': 'ru-RU,ru;q=0.9',
+                    'Referer': f'{self.BASE_URL}/',
+                    'Origin': self.BASE_URL,
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-site',
+                }
+                
+                response = self._make_request(url, headers=api_headers)
+                
+                # Проверяем статус ответа
+                if response:
+                    logger.info(f"Статус ответа API: {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        products = self._extract_products(response.text)
+                        
+                        if products:
+                            if limit:
+                                products = products[:limit]
+                            logger.info(f"Получено товаров: {len(products)}")
+                            return products
+                        else:
+                            logger.warning("API вернул 200, но товары не найдены в ответе")
+                            # Пробуем веб-версию как fallback
+                            break
+                    elif response.status_code == 429:
+                        # Rate limit - ждем дольше
+                        wait_time = retry_delay * (attempt + 1) * 2
+                        logger.warning(f"Rate limit (429), жду {wait_time} секунд перед повтором")
+                        time.sleep(wait_time)
+                        continue
+                    elif response.status_code in [498, 403, 503]:
+                        # Временные проблемы - ждем и пробуем снова
+                        logger.warning(f"API вернул статус {response.status_code}, жду {retry_delay} секунд перед повтором")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        logger.warning(f"API вернул статус {response.status_code}")
+                
+                # Если не удалось или последняя попытка - пробуем веб-версию
+                if attempt == max_retries - 1 or not response:
+                    logger.warning("Не удалось получить ответ от API, пробуем веб-версию")
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Ошибка при запросе к API (попытка {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    logger.warning("Все попытки API исчерпаны, пробуем веб-версию")
+                    break
         
-        response = self._make_request(url, headers=api_headers)
-        
-        # Проверяем статус ответа
-        if response:
-            logger.info(f"Статус ответа API: {response.status_code}")
-            if response.status_code != 200:
-                logger.warning(f"API вернул статус {response.status_code}")
-        
-        if not response or response.status_code != 200:
-            logger.warning("Не удалось получить ответ от API, пробуем веб-версию")
-            # Fallback на веб-версию с правильными заголовками
+        # Fallback на веб-версию
+        try:
             web_headers = {
-                'Accept': 'text/html,application/xhtml+xml',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9',
                 'Referer': f'{self.BASE_URL}/',
             }
             web_url = f"{self.BASE_URL}/catalog/0/search.aspx?search={quote(query)}"
+            logger.info(f"Пробуем веб-версию: {web_url}")
+            
             response = self._make_request(web_url, headers=web_headers)
-            if not response:
+            if response and response.status_code == 200:
+                products = self._extract_products(response.text)
+                if limit:
+                    products = products[:limit]
+                logger.info(f"Веб-версия вернула {len(products)} товаров")
+                return products
+            else:
                 logger.error("Не удалось получить ответ от веб-версии")
                 return []
-        
-        products = self._extract_products(response.text)
-        
-        if limit:
-            products = products[:limit]
-        
-        logger.info(f"Получено товаров: {len(products)}")
-        return products
+        except Exception as e:
+            logger.error(f"Ошибка при запросе к веб-версии: {e}")
+            return []
     
     def _build_search_url(self, query: str) -> str:
         """Формирует URL для поиска через API"""
