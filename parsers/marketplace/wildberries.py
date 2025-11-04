@@ -1,6 +1,7 @@
 from typing import Dict, List, Any, Optional
 from urllib.parse import urlencode, quote
 from .base_marketplace import BaseMarketplaceParser
+import re
 
 
 class WildberriesParser(BaseMarketplaceParser):
@@ -125,12 +126,35 @@ class WildberriesParser(BaseMarketplaceParser):
             soup = self._parse_html(html)
             products = []
             
-            # Ищем карточки товаров (селекторы могут меняться)
-            product_cards = soup.find_all('article', class_='product-card') or \
-                          soup.find_all('div', class_='product-card') or \
-                          soup.find_all('div', {'data-product-id': True})
+            # Ищем карточки товаров - пробуем разные селекторы
+            product_cards = []
+            selectors = [
+                soup.find_all('article', class_='product-card'),
+                soup.find_all('div', class_='product-card'),
+                soup.find_all('div', {'data-product-id': True}),
+                soup.find_all('article', {'data-product-id': True}),
+                soup.find_all('div', class_=lambda x: x and 'product' in ' '.join(x).lower()),
+                soup.find_all('article'),
+                # По структуре - div с data-nm-id
+                soup.find_all('div', {'data-nm-id': True}),
+            ]
             
-            logger.info(f"Найдено {len(product_cards)} карточек товаров в HTML")
+            for selector_result in selectors:
+                if selector_result:
+                    product_cards = selector_result
+                    logger.info(f"Найдено {len(product_cards)} карточек товаров используя селектор")
+                    break
+            
+            if not product_cards:
+                logger.warning("Стандартные селекторы не сработали, пробуем универсальный подход")
+                # Ищем все ссылки с catalog в href
+                catalog_links = soup.find_all('a', href=lambda x: x and '/catalog/' in str(x))
+                logger.info(f"Найдено {len(catalog_links)} ссылок на товары")
+                for link in catalog_links:
+                    parent = link.find_parent('article') or link.find_parent('div')
+                    if parent and parent not in product_cards:
+                        product_cards.append(parent)
+                logger.info(f"Добавлено {len(product_cards)} карточек через ссылки")
             
             for card in product_cards:
                 try:
@@ -150,16 +174,45 @@ class WildberriesParser(BaseMarketplaceParser):
                         link = card.find('a', href=True)
                         if link:
                             href = link.get('href', '')
-                            match = re.search(r'/(\d+)/', href)
-                            if match:
-                                product_id = match.group(1)
+                            # Пробуем разные паттерны для ID
+                            patterns = [
+                                r'/catalog/(\d+)/',
+                                r'/(\d+)',
+                                r'nm_id=(\d+)',
+                                r'product_id=(\d+)',
+                            ]
+                            for pattern in patterns:
+                                match = re.search(pattern, href)
+                                if match:
+                                    product_id = match.group(1)
+                                    break
                     
-                    # Название
-                    name_elem = card.find('span', class_='product-card__name') or \
-                               card.find('a', class_='product-card__name') or \
-                               card.find('h3') or \
-                               card.find('span', {'data-product-name': True})
-                    name = name_elem.get_text(strip=True) if name_elem else ''
+                    # Название - пробуем разные варианты
+                    name = ''
+                    name_selectors = [
+                        ('span', {'class': lambda x: x and 'name' in ' '.join(x).lower()}),
+                        ('a', {'class': lambda x: x and 'name' in ' '.join(x).lower()}),
+                        ('h3', None),
+                        ('h2', None),
+                        ('span', {'data-product-name': True}),
+                        ('a', {'href': lambda x: x and '/catalog/' in str(x)}),
+                    ]
+                    
+                    for tag, attrs in name_selectors:
+                        if attrs is None:
+                            name_elem = card.find(tag)
+                        else:
+                            name_elem = card.find(tag, attrs)
+                        if name_elem:
+                            name = name_elem.get_text(strip=True)
+                            if name and len(name) > 3:
+                                break
+                    
+                    # Если не нашли, берем текст из ссылки
+                    if not name or len(name) < 3:
+                        link = card.find('a', href=True)
+                        if link:
+                            name = link.get_text(strip=True) or link.get('title', '') or link.get('aria-label', '')
                     
                     # Цена
                     price_elem = card.find('span', class_='price') or \
@@ -266,10 +319,33 @@ class WildberriesParser(BaseMarketplaceParser):
                         continue
             
             if not products:
-                logger.warning(f"Товары не найдены. Структура ответа: {list(data.keys())[:5]}")
+                logger.warning(f"Товары не найдены в JSON. Структура ответа: {list(data.keys())[:5]}")
+                # Логируем структуру для отладки
+                if 'data' in data:
+                    logger.debug(f"Data structure: {type(data['data'])} - {list(data['data'].keys()) if isinstance(data['data'], dict) else 'list'}")
                 # Пробуем веб-версию как fallback
                 if not html.startswith('{'):
+                    logger.info("Пробуем извлечь товары из HTML веб-версии")
                     return self._extract_products_from_html(html)
+                else:
+                    # Если это JSON, но товаров нет, пробуем другие ключи
+                    logger.warning("Пробуем альтернативные пути в JSON")
+                    if 'value' in data and isinstance(data['value'], list):
+                        logger.info("Найден массив в 'value', пробуем извлечь")
+                        for item in data['value'][:10]:
+                            try:
+                                if isinstance(item, dict) and ('name' in item or 'title' in item):
+                                    product = {
+                                        'id': str(item.get('id', '')),
+                                        'name': item.get('name', '') or item.get('title', ''),
+                                        'price': item.get('price', 0),
+                                        'url': f"{self.BASE_URL}/catalog/{item.get('id')}/detail.aspx" if item.get('id') else '',
+                                        'source': 'wildberries'
+                                    }
+                                    if product.get('name'):
+                                        products.append(product)
+                            except:
+                                continue
             
             return products
             
