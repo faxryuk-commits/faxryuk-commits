@@ -235,7 +235,7 @@ class WildberriesParser(BaseMarketplaceParser):
                             except:
                                 pass
                     
-                    if name and product_id:
+                    if name:
                         # Формируем URL
                         url = ''
                         if product_id:
