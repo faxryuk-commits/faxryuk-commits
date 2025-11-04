@@ -99,9 +99,15 @@ class BaseParser(ABC):
             
             # Логируем статус для отладки
             if response.status_code != 200:
-                logger.warning(f"Запрос к {url} вернул статус {response.status_code}")
+                # Специальная обработка для статуса 498 (часто используется для блокировок)
+                if response.status_code == 498:
+                    logger.warning(f"Запрос к {url} вернул статус 498 (possible rate limit or block)")
+                else:
+                    logger.warning(f"Запрос к {url} вернул статус {response.status_code}")
             
-            response.raise_for_status()
+            # Для 498 не выбрасываем исключение, возвращаем response для обработки
+            if response.status_code != 498:
+                response.raise_for_status()
             
             # Задержка между запросами
             time.sleep(self.delay)
